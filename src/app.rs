@@ -1,5 +1,5 @@
 use egui::Slider;
-use egui_plot::{Line, Polygon};
+use egui_plot::{Line, PlotResponse};
 use nalgebra as na;
 
 use crate::gp::RbfKernel;
@@ -130,16 +130,10 @@ impl eframe::App for App {
                 changed = true;
             }
 
-            if changed {
-                self.gp = Some(crate::gp::GaussianProcess::new(
-                    &na::DVector::from_vec(self.x.clone()),
-                    &na::DVector::from_vec(self.y.clone()),
-                    RbfKernel {
-                        sigma: self.kernel_sigma,
-                        length_scale: self.kernel_length_scale,
-                    },
-                    self.noise_sigma,
-                ));
+            if ui.button("Clear").clicked() {
+                self.x.clear();
+                self.y.clear();
+                changed = true;
             }
 
             if let Some(gp) = &self.gp {
@@ -190,14 +184,62 @@ impl eframe::App for App {
                 let points = egui_plot::Points::new(points)
                     .color(egui::Color32::LIGHT_GREEN)
                     .radius(5.0)
-                    .shape(egui_plot::MarkerShape::Circle);
+                    .shape(egui_plot::MarkerShape::Circle)
+                    .id(egui::Id::new("training_points"));
 
-                let _ = egui_plot::Plot::new("plot").show(ui, |pui| {
+                let PlotResponse {
+                    response: _,
+                    inner: (pointer_coordinate, clicked),
+                    hovered_plot_item,
+                    ..
+                } = egui_plot::Plot::new("plot").show(ui, |pui| {
                     pui.line(lower_variance_line.name("Mean - Variance"));
                     pui.line(upper_variance_line.name("Mean + Variance"));
                     pui.line(mean_line.name("Mean"));
                     pui.points(points.name("Training points"));
+                    (pui.pointer_coordinate(), pui.response().clicked())
                 });
+
+                if clicked {
+                    if let (Some(hovered_plot_item), Some(pos)) =
+                        (hovered_plot_item, pointer_coordinate)
+                    {
+                        if hovered_plot_item == egui::Id::new("training_points") {
+                            // find the index of the point that was clicked
+
+                            if let Some((index, _)) = self
+                                .x
+                                .iter()
+                                .zip(self.y.iter())
+                                .map(|(x, y)| (*x - pos.x).powf(2.0) + (*y - pos.y).powf(2.0))
+                                .enumerate()
+                                .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                            {
+                                println!("Removing point at index {}", index);
+                                self.x.remove(index);
+                                self.y.remove(index);
+                                changed = true;
+                            }
+                        }
+                    } else if let Some(pointer_coordinate) = pointer_coordinate {
+                        self.x.push(pointer_coordinate.x);
+                        self.y.push(pointer_coordinate.y);
+                        changed = true;
+                    }
+                }
+            }
+
+            if changed || self.gp.is_none() {
+                println!("Recomputing GP: len = {}", self.x.len());
+                self.gp = Some(crate::gp::GaussianProcess::new(
+                    &na::DVector::from_vec(self.x.clone()),
+                    &na::DVector::from_vec(self.y.clone()),
+                    RbfKernel {
+                        sigma: self.kernel_sigma,
+                        length_scale: self.kernel_length_scale,
+                    },
+                    self.noise_sigma,
+                ));
             }
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {

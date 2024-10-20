@@ -5,7 +5,6 @@ pub struct GaussianProcess<K: GpKernel> {
     x: na::DVector<f64>,
     y: na::DVector<f64>,
     input_cov_matrix_inv: na::DMatrix<f64>,
-    noise_sigma: f64,
 }
 
 pub trait GpKernel {
@@ -53,7 +52,6 @@ impl<K: GpKernel> GaussianProcess<K> {
             x: x.clone(),
             y: y.clone(),
             input_cov_matrix_inv: inverse,
-            noise_sigma,
         }
     }
 
@@ -87,7 +85,7 @@ impl<K: GpKernel> GaussianProcess<K> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use na::{DMatrix, DVector};
+    use na::DVector;
 
     #[test]
     fn test_rbf_kernel_compute() {
