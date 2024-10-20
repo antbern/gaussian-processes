@@ -8,13 +8,6 @@ use crate::gp::RbfKernel;
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct App {
-    // Example stuff:
-    label: String,
-
-    #[serde(skip)] // This how you opt-out of serialization of a field
-    value: f32,
-
-    // state for the Gaussian Process
     x: Vec<f64>,
     y: Vec<f64>,
     kernel_length_scale: f64,
@@ -27,9 +20,6 @@ pub struct App {
 impl Default for App {
     fn default() -> Self {
         Self {
-            // Example stuff:
-            label: "Hello World!".to_owned(),
-            value: 2.7,
             x: vec![1.0, 2.0, 6.0],
             y: vec![1.0, 1.0, -1.0],
             kernel_sigma: 1.0,
@@ -88,25 +78,9 @@ impl eframe::App for App {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             // The central panel the region left after adding TopPanel's and SidePanel's
-            ui.heading("eframe template");
+            ui.heading("Gaussian Processes");
 
-            ui.horizontal(|ui| {
-                ui.label("Write something: ");
-                ui.text_edit_singleline(&mut self.label);
-            });
-
-            ui.add(egui::Slider::new(&mut self.value, 0.0..=10.0).text("value"));
-            if ui.button("Increment").clicked() {
-                self.value += 1.0;
-            }
-
-            ui.separator();
-
-            ui.add(egui::github_link_file!(
-                "https://github.com/emilk/eframe_template/blob/main/",
-                "Source code."
-            ));
-
+            ui.label("Kernel parameters:");
             let mut changed = false;
             if ui
                 .add(
@@ -130,11 +104,13 @@ impl eframe::App for App {
                 changed = true;
             }
 
-            if ui.button("Clear").clicked() {
+            ui.label("Click anywhere to add points, click on points to remove them.");
+            if ui.button("Clear all Points").clicked() {
                 self.x.clear();
                 self.y.clear();
                 changed = true;
             }
+            ui.label("Ctrl-Scroll to zoom, Scroll and Shift-scroll to pan.");
 
             if let Some(gp) = &self.gp {
                 // linearly spaced points from 0 to 10
@@ -215,7 +191,6 @@ impl eframe::App for App {
                                 .enumerate()
                                 .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
                             {
-                                println!("Removing point at index {}", index);
                                 self.x.remove(index);
                                 self.y.remove(index);
                                 changed = true;
@@ -230,7 +205,6 @@ impl eframe::App for App {
             }
 
             if changed || self.gp.is_none() {
-                println!("Recomputing GP: len = {}", self.x.len());
                 self.gp = Some(crate::gp::GaussianProcess::new(
                     &na::DVector::from_vec(self.x.clone()),
                     &na::DVector::from_vec(self.y.clone()),
