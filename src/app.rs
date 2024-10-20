@@ -1,20 +1,31 @@
+use egui::Slider;
+use egui_plot::{Line, PlotResponse};
+use nalgebra as na;
+
+use crate::gp::RbfKernel;
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct App {
-    // Example stuff:
-    label: String,
-
-    #[serde(skip)] // This how you opt-out of serialization of a field
-    value: f32,
+    x: Vec<f64>,
+    y: Vec<f64>,
+    kernel_length_scale: f64,
+    kernel_sigma: f64,
+    noise_sigma: f64,
+    #[serde(skip)]
+    gp: Option<crate::gp::GaussianProcess<RbfKernel>>,
 }
 
 impl Default for App {
     fn default() -> Self {
         Self {
-            // Example stuff:
-            label: "Hello World!".to_owned(),
-            value: 2.7,
+            x: vec![1.0, 2.0, 6.0],
+            y: vec![1.0, 1.0, -1.0],
+            kernel_sigma: 1.0,
+            kernel_length_scale: 1.0,
+            noise_sigma: 0.1,
+            gp: None,
         }
     }
 }
@@ -67,47 +78,143 @@ impl eframe::App for App {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             // The central panel the region left after adding TopPanel's and SidePanel's
-            ui.heading("eframe template");
+            ui.heading("Gaussian Processes");
 
-            ui.horizontal(|ui| {
-                ui.label("Write something: ");
-                ui.text_edit_singleline(&mut self.label);
-            });
-
-            ui.add(egui::Slider::new(&mut self.value, 0.0..=10.0).text("value"));
-            if ui.button("Increment").clicked() {
-                self.value += 1.0;
+            ui.label("Kernel parameters:");
+            let mut changed = false;
+            if ui
+                .add(
+                    Slider::new(&mut self.kernel_length_scale, 0.0..=10.0)
+                        .text("Kernel length scale"),
+                )
+                .changed()
+            {
+                changed = true;
+            }
+            if ui
+                .add(Slider::new(&mut self.kernel_sigma, 0.0..=10.0).text("Kernel sigma"))
+                .changed()
+            {
+                changed = true;
+            }
+            if ui
+                .add(Slider::new(&mut self.noise_sigma, 0.0..=10.0).text("Noise sigma"))
+                .changed()
+            {
+                changed = true;
             }
 
-            ui.separator();
+            ui.label("Click anywhere to add points, click on points to remove them.");
+            if ui.button("Clear all Points").clicked() {
+                self.x.clear();
+                self.y.clear();
+                changed = true;
+            }
+            ui.label("Ctrl-Scroll to zoom, Scroll and Shift-scroll to pan.");
 
-            ui.add(egui::github_link_file!(
-                "https://github.com/emilk/eframe_template/blob/main/",
-                "Source code."
-            ));
+            if let Some(gp) = &self.gp {
+                // linearly spaced points from 0 to 10
+                let prediction_x = (0..=100)
+                    .map(|i| i as f64 / 100.0 * 10.0)
+                    .collect::<Vec<f64>>();
 
-            // plot some points
-            let points: egui_plot::PlotPoints = (0..=10).map(|i| [i as f64, i as f64]).collect();
-            let line = egui_plot::Line::new(points).color(egui::Color32::RED);
+                let (means, variances) = gp.predict(&na::DVector::from_vec(prediction_x.clone()));
 
-            // do a filled line
-            let points: egui_plot::PlotPoints =
-                vec![[0.0, 0.0], [0.0, 5.0], [5.0, 5.0], [5.0, 0.0], [0.0, 0.0]].into();
-            let line_fill = egui_plot::Line::new(points)
-                .color(egui::Color32::YELLOW)
-                .fill(0.0);
+                let mean_points: egui_plot::PlotPoints = means
+                    .iter()
+                    .zip(prediction_x.iter())
+                    .map(|(y, x)| [*x, *y])
+                    .collect();
+                let mean_line = egui_plot::Line::new(mean_points).color(egui::Color32::RED);
 
-            let points: egui_plot::PlotPoints = (0..=10).map(|i| [i as f64, i as f64]).collect();
-            let points = egui_plot::Points::new(points)
-                .color(egui::Color32::BLUE)
-                .radius(5.0)
-                .shape(egui_plot::MarkerShape::Square);
+                // egui_plot does not support filling non-convex polygons, so we fallback to
+                // drawing some lines to represent the variance instead.
 
-            let _ = egui_plot::Plot::new("plot").show(ui, |pui| {
-                pui.line(line);
-                pui.line(line_fill);
-                pui.points(points);
-            });
+                // lower variance points
+                let variance_points = variances
+                    .iter()
+                    .zip(means.iter())
+                    .zip(prediction_x.iter())
+                    .map(|((sigma, mean), x)| [*x, (*mean - *sigma)])
+                    .collect::<Vec<[f64; 2]>>();
+                let lower_variance_line =
+                    Line::new(variance_points).color(egui::Color32::LIGHT_BLUE);
+
+                // upper variance points
+                let variance_points = variances
+                    .iter()
+                    .zip(means.iter())
+                    .zip(prediction_x.iter())
+                    .map(|((sigma, mean), x)| [*x, (*mean + *sigma)])
+                    .collect::<Vec<[f64; 2]>>();
+                let upper_variance_line =
+                    Line::new(variance_points).color(egui::Color32::LIGHT_BLUE);
+
+                // the points the GP was trained on
+                let points: egui_plot::PlotPoints = self
+                    .x
+                    .iter()
+                    .zip(self.y.iter())
+                    .map(|(x, y)| [*x, *y])
+                    .collect();
+                let points = egui_plot::Points::new(points)
+                    .color(egui::Color32::LIGHT_GREEN)
+                    .radius(5.0)
+                    .shape(egui_plot::MarkerShape::Circle)
+                    .id(egui::Id::new("training_points"));
+
+                let PlotResponse {
+                    response: _,
+                    inner: (pointer_coordinate, clicked),
+                    hovered_plot_item,
+                    ..
+                } = egui_plot::Plot::new("plot").show(ui, |pui| {
+                    pui.line(lower_variance_line.name("Mean - Variance"));
+                    pui.line(upper_variance_line.name("Mean + Variance"));
+                    pui.line(mean_line.name("Mean"));
+                    pui.points(points.name("Training points"));
+                    (pui.pointer_coordinate(), pui.response().clicked())
+                });
+
+                if clicked {
+                    if let (Some(hovered_plot_item), Some(pos)) =
+                        (hovered_plot_item, pointer_coordinate)
+                    {
+                        if hovered_plot_item == egui::Id::new("training_points") {
+                            // find the index of the point that was clicked
+
+                            if let Some((index, _)) = self
+                                .x
+                                .iter()
+                                .zip(self.y.iter())
+                                .map(|(x, y)| (*x - pos.x).powf(2.0) + (*y - pos.y).powf(2.0))
+                                .enumerate()
+                                .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                            {
+                                self.x.remove(index);
+                                self.y.remove(index);
+                                changed = true;
+                            }
+                        }
+                    } else if let Some(pointer_coordinate) = pointer_coordinate {
+                        self.x.push(pointer_coordinate.x);
+                        self.y.push(pointer_coordinate.y);
+                        changed = true;
+                    }
+                }
+            }
+
+            if changed || self.gp.is_none() {
+                self.gp = Some(crate::gp::GaussianProcess::new(
+                    &na::DVector::from_vec(self.x.clone()),
+                    &na::DVector::from_vec(self.y.clone()),
+                    RbfKernel {
+                        sigma: self.kernel_sigma,
+                        length_scale: self.kernel_length_scale,
+                    },
+                    self.noise_sigma,
+                ));
+            }
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 powered_by_egui_and_eframe(ui);
