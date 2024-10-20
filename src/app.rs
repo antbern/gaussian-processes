@@ -1,3 +1,9 @@
+use egui::Slider;
+use egui_plot::{Line, Polygon};
+use nalgebra as na;
+
+use crate::gp::RbfKernel;
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -7,6 +13,15 @@ pub struct App {
 
     #[serde(skip)] // This how you opt-out of serialization of a field
     value: f32,
+
+    // state for the Gaussian Process
+    x: Vec<f64>,
+    y: Vec<f64>,
+    kernel_length_scale: f64,
+    kernel_sigma: f64,
+    noise_sigma: f64,
+    #[serde(skip)]
+    gp: Option<crate::gp::GaussianProcess<RbfKernel>>,
 }
 
 impl Default for App {
@@ -15,6 +30,12 @@ impl Default for App {
             // Example stuff:
             label: "Hello World!".to_owned(),
             value: 2.7,
+            x: vec![1.0, 2.0, 6.0],
+            y: vec![1.0, 1.0, -1.0],
+            kernel_sigma: 1.0,
+            kernel_length_scale: 1.0,
+            noise_sigma: 0.1,
+            gp: None,
         }
     }
 }
@@ -86,28 +107,98 @@ impl eframe::App for App {
                 "Source code."
             ));
 
-            // plot some points
-            let points: egui_plot::PlotPoints = (0..=10).map(|i| [i as f64, i as f64]).collect();
-            let line = egui_plot::Line::new(points).color(egui::Color32::RED);
+            let mut changed = false;
+            if ui
+                .add(
+                    Slider::new(&mut self.kernel_length_scale, 0.0..=10.0)
+                        .text("Kernel length scale"),
+                )
+                .changed()
+            {
+                changed = true;
+            }
+            if ui
+                .add(Slider::new(&mut self.kernel_sigma, 0.0..=10.0).text("Kernel sigma"))
+                .changed()
+            {
+                changed = true;
+            }
+            if ui
+                .add(Slider::new(&mut self.noise_sigma, 0.0..=10.0).text("Noise sigma"))
+                .changed()
+            {
+                changed = true;
+            }
 
-            // do a filled line
-            let points: egui_plot::PlotPoints =
-                vec![[0.0, 0.0], [0.0, 5.0], [5.0, 5.0], [5.0, 0.0], [0.0, 0.0]].into();
-            let line_fill = egui_plot::Line::new(points)
-                .color(egui::Color32::YELLOW)
-                .fill(0.0);
+            if changed {
+                self.gp = Some(crate::gp::GaussianProcess::new(
+                    &na::DVector::from_vec(self.x.clone()),
+                    &na::DVector::from_vec(self.y.clone()),
+                    RbfKernel {
+                        sigma: self.kernel_sigma,
+                        length_scale: self.kernel_length_scale,
+                    },
+                    self.noise_sigma,
+                ));
+            }
 
-            let points: egui_plot::PlotPoints = (0..=10).map(|i| [i as f64, i as f64]).collect();
-            let points = egui_plot::Points::new(points)
-                .color(egui::Color32::BLUE)
-                .radius(5.0)
-                .shape(egui_plot::MarkerShape::Square);
+            if let Some(gp) = &self.gp {
+                // linearly spaced points from 0 to 10
+                let prediction_x = (0..=100)
+                    .map(|i| i as f64 / 100.0 * 10.0)
+                    .collect::<Vec<f64>>();
 
-            let _ = egui_plot::Plot::new("plot").show(ui, |pui| {
-                pui.line(line);
-                pui.line(line_fill);
-                pui.points(points);
-            });
+                let (means, variances) = gp.predict(&na::DVector::from_vec(prediction_x.clone()));
+
+                let mean_points: egui_plot::PlotPoints = means
+                    .iter()
+                    .zip(prediction_x.iter())
+                    .map(|(y, x)| [*x, *y])
+                    .collect();
+                let mean_line = egui_plot::Line::new(mean_points).color(egui::Color32::RED);
+
+                // egui_plot does not support filling non-convex polygons, so we fallback to
+                // drawing some lines to represent the variance instead.
+
+                // lower variance points
+                let variance_points = variances
+                    .iter()
+                    .zip(means.iter())
+                    .zip(prediction_x.iter())
+                    .map(|((sigma, mean), x)| [*x, (*mean - *sigma)])
+                    .collect::<Vec<[f64; 2]>>();
+                let lower_variance_line =
+                    Line::new(variance_points).color(egui::Color32::LIGHT_BLUE);
+
+                // upper variance points
+                let variance_points = variances
+                    .iter()
+                    .zip(means.iter())
+                    .zip(prediction_x.iter())
+                    .map(|((sigma, mean), x)| [*x, (*mean + *sigma)])
+                    .collect::<Vec<[f64; 2]>>();
+                let upper_variance_line =
+                    Line::new(variance_points).color(egui::Color32::LIGHT_BLUE);
+
+                // the points the GP was trained on
+                let points: egui_plot::PlotPoints = self
+                    .x
+                    .iter()
+                    .zip(self.y.iter())
+                    .map(|(x, y)| [*x, *y])
+                    .collect();
+                let points = egui_plot::Points::new(points)
+                    .color(egui::Color32::LIGHT_GREEN)
+                    .radius(5.0)
+                    .shape(egui_plot::MarkerShape::Circle);
+
+                let _ = egui_plot::Plot::new("plot").show(ui, |pui| {
+                    pui.line(lower_variance_line.name("Mean - Variance"));
+                    pui.line(upper_variance_line.name("Mean + Variance"));
+                    pui.line(mean_line.name("Mean"));
+                    pui.points(points.name("Training points"));
+                });
+            }
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 powered_by_egui_and_eframe(ui);
