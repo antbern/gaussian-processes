@@ -86,6 +86,29 @@ impl eframe::App for App {
                 "Source code."
             ));
 
+            // plot some points
+            let points: egui_plot::PlotPoints = (0..=10).map(|i| [i as f64, i as f64]).collect();
+            let line = egui_plot::Line::new(points).color(egui::Color32::RED);
+
+            // do a filled line
+            let points: egui_plot::PlotPoints =
+                vec![[0.0, 0.0], [0.0, 5.0], [5.0, 5.0], [5.0, 0.0], [0.0, 0.0]].into();
+            let line_fill = egui_plot::Line::new(points)
+                .color(egui::Color32::YELLOW)
+                .fill(0.0);
+
+            let points: egui_plot::PlotPoints = (0..=10).map(|i| [i as f64, i as f64]).collect();
+            let points = egui_plot::Points::new(points)
+                .color(egui::Color32::BLUE)
+                .radius(5.0)
+                .shape(egui_plot::MarkerShape::Square);
+
+            let p = egui_plot::Plot::new("plot").show(ui, |pui| {
+                pui.line(line);
+                pui.line(line_fill);
+                pui.points(points);
+            });
+
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 powered_by_egui_and_eframe(ui);
                 egui::warn_if_debug_build(ui);
