@@ -1,7 +1,7 @@
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
-pub struct TemplateApp {
+pub struct App {
     // Example stuff:
     label: String,
 
@@ -9,7 +9,7 @@ pub struct TemplateApp {
     value: f32,
 }
 
-impl Default for TemplateApp {
+impl Default for App {
     fn default() -> Self {
         Self {
             // Example stuff:
@@ -19,7 +19,7 @@ impl Default for TemplateApp {
     }
 }
 
-impl TemplateApp {
+impl App {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // This is also where you can customize the look and feel of egui using
@@ -35,7 +35,7 @@ impl TemplateApp {
     }
 }
 
-impl eframe::App for TemplateApp {
+impl eframe::App for App {
     /// Called by the frame work to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
@@ -85,6 +85,29 @@ impl eframe::App for TemplateApp {
                 "https://github.com/emilk/eframe_template/blob/main/",
                 "Source code."
             ));
+
+            // plot some points
+            let points: egui_plot::PlotPoints = (0..=10).map(|i| [i as f64, i as f64]).collect();
+            let line = egui_plot::Line::new(points).color(egui::Color32::RED);
+
+            // do a filled line
+            let points: egui_plot::PlotPoints =
+                vec![[0.0, 0.0], [0.0, 5.0], [5.0, 5.0], [5.0, 0.0], [0.0, 0.0]].into();
+            let line_fill = egui_plot::Line::new(points)
+                .color(egui::Color32::YELLOW)
+                .fill(0.0);
+
+            let points: egui_plot::PlotPoints = (0..=10).map(|i| [i as f64, i as f64]).collect();
+            let points = egui_plot::Points::new(points)
+                .color(egui::Color32::BLUE)
+                .radius(5.0)
+                .shape(egui_plot::MarkerShape::Square);
+
+            let _ = egui_plot::Plot::new("plot").show(ui, |pui| {
+                pui.line(line);
+                pui.line(line_fill);
+                pui.points(points);
+            });
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 powered_by_egui_and_eframe(ui);
