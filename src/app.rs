@@ -103,7 +103,7 @@ impl eframe::App for App {
                 .radius(5.0)
                 .shape(egui_plot::MarkerShape::Square);
 
-            let p = egui_plot::Plot::new("plot").show(ui, |pui| {
+            let _ = egui_plot::Plot::new("plot").show(ui, |pui| {
                 pui.line(line);
                 pui.line(line_fill);
                 pui.points(points);
